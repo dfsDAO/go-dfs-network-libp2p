@@ -1,0 +1,8 @@
+libp2p:
+  key: "CAESQLxHX0nc2bujz2jEDPDfZMIhk9axMbbi4ucOrtPOZHcpptVxNrYZMtiharEHD4u+2j1kDOukVCXczykuBH/noj0="
+  listen:
+    - "/ip4/127.0.0.1/udp/1904/kcp"
+    - "/ip6/::1/udp/1904/kcp"
+  dht:
+    boostrap:
+      - "/ip4/127.0.0.1/udp/1903/kcp/p2p/12D3KooWHhdzkzgK2c5WugtdiW6Z4XF6tMgAVwDLTz6rmcY4CbcT"
