@@ -1,0 +1,4 @@
+libp2p:
+  listen:
+    - "/ip4/127.0.0.1/udp/1903/kcp"
+    - "/ip6/::1/udp/1903/kcp"
