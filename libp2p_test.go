@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	ipfslog "github.com/ipfs/go-log"
+	_ "github.com/libs4go/ipfslog-slf4go" //
 	"github.com/libs4go/scf4go"
 	_ "github.com/libs4go/scf4go/codec" //
 	"github.com/libs4go/scf4go/reader/file"
@@ -29,8 +29,6 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-
-	ipfslog.SetAllLoggers(ipfslog.LevelDebug)
 }
 
 func createNode(id int) (smf4go.Runnable, error) {

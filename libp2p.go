@@ -9,7 +9,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
-	tcp "github.com/libp2p/go-tcp-transport"
+	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/libs4go/errors"
 	kcp "github.com/libs4go/libp2p-kcp"
 	"github.com/libs4go/scf4go"
@@ -40,36 +40,14 @@ func New(config scf4go.Config) (smf4go.Runnable, error) {
 
 	logger := slf4go.Get("dfs-network-libp2p")
 
-	libp2pKeyConfig := config.Get("libp2p", "key").String("")
+	node := &libp2pNode{
+		Logger: logger,
+	}
 
-	var privateKey crypto.PrivKey
+	privateKey, err := node.privateKey(config)
 
-	if libp2pKeyConfig == "" {
-		var err error
-		privateKey, _, err = crypto.GenerateKeyPair(crypto.Ed25519, 2048)
-
-		if err != nil {
-			return nil, errors.Wrap(err, "create libp2p key error")
-		}
-
-		buff, err := crypto.MarshalPrivateKey(privateKey)
-
-		if err != nil {
-			return nil, errors.Wrap(err, "create libp2p key error")
-		}
-
-		libp2pKeyConfig = crypto.ConfigEncodeKey(buff)
-
-		logger.I("create new libp2p key: {@key}", libp2pKeyConfig)
-
-	} else {
-		buff, err := crypto.ConfigDecodeKey(libp2pKeyConfig)
-
-		if err != nil {
-			return nil, errors.Wrap(err, "load libp2p key error")
-		}
-
-		privateKey, err = crypto.UnmarshalPrivateKey(buff)
+	if err != nil {
+		return nil, err
 	}
 
 	kcp, err := kcp.New(privateKey, kcp.WithTLS())
@@ -78,29 +56,22 @@ func New(config scf4go.Config) (smf4go.Runnable, error) {
 		return nil, err
 	}
 
-	var addrs []string
-
-	err = config.Get("libp2p", "listen").Scan(&addrs)
+	addrs, err := node.addrs(config)
 
 	if err != nil {
-		return nil, errors.Wrap(err, "load config libp2p.listen error")
-	}
-
-	if len(addrs) == 0 {
-		addrs = []string{
-			"/ip4/127.0.0.1/udp/1902/kcp",
-			"/ip6/::1/udp/1902/kcp",
-		}
+		return nil, err
 	}
 
 	opts := []libp2p.Option{
 		libp2p.ListenAddrStrings(addrs...),
 		libp2p.Identity(privateKey),
-		libp2p.DisableRelay(),
-		libp2p.ChainOptions(
-			libp2p.Transport(kcp),
-			libp2p.Transport(tcp.NewTCPTransport),
-		),
+		libp2p.NATPortMap(),
+		libp2p.DefaultTransports,
+		libp2p.Transport(kcp),
+		libp2p.Routing(func(h host.Host) (routing.PeerRouting, error) {
+			return node.createDHT(config, h)
+		}),
+		libp2p.EnableAutoRelay(),
 	}
 
 	host, err := libp2p.New(context.Background(), opts...)
@@ -111,9 +82,15 @@ func New(config scf4go.Config) (smf4go.Runnable, error) {
 
 	logger.I("start libp2p {@id}", host.ID().Pretty())
 
+	node.host = host
+
+	return node, nil
+}
+
+func (node *libp2pNode) createDHT(config scf4go.Config, host host.Host) (*dht.IpfsDHT, error) {
 	var dhtBoostrapAddrs []string
 
-	err = config.Get("libp2p", "dht", "boostrap").Scan(&dhtBoostrapAddrs)
+	err := config.Get("libp2p", "dht", "boostrap").Scan(&dhtBoostrapAddrs)
 
 	if err != nil {
 		return nil, errors.Wrap(err, "load config libp2p.dht.boostrap error")
@@ -137,7 +114,7 @@ func New(config scf4go.Config) (smf4go.Runnable, error) {
 
 		peers = append(peers, *addrInfo)
 
-		logger.I("add dht bootstrap addr {@}", addrInfo.String())
+		node.I("add dht bootstrap addr {@}", addrInfo.String())
 	}
 
 	if len(peers) == 0 {
@@ -154,11 +131,69 @@ func New(config scf4go.Config) (smf4go.Runnable, error) {
 		return nil, errors.Wrap(err, "create libp2p dht error")
 	}
 
-	return &libp2pNode{
-		host:   host,
-		dht:    dht,
-		Logger: logger,
-	}, nil
+	node.dht = dht
+
+	return dht, nil
+}
+
+func (node *libp2pNode) addrs(config scf4go.Config) ([]string, error) {
+
+	var addrs []string
+
+	err := config.Get("libp2p", "listen").Scan(&addrs)
+
+	if err != nil {
+		return nil, errors.Wrap(err, "load config libp2p.listen error")
+	}
+
+	if len(addrs) == 0 {
+		addrs = []string{
+			"/ip4/127.0.0.1/udp/1902/kcp",
+			"/ip6/::1/udp/1902/kcp",
+		}
+	}
+
+	return addrs, nil
+}
+
+func (node *libp2pNode) privateKey(config scf4go.Config) (crypto.PrivKey, error) {
+	libp2pKeyConfig := config.Get("libp2p", "key").String("")
+
+	var privateKey crypto.PrivKey
+
+	if libp2pKeyConfig == "" {
+		var err error
+		privateKey, _, err = crypto.GenerateKeyPair(crypto.Ed25519, 2048)
+
+		if err != nil {
+			return nil, errors.Wrap(err, "create libp2p key error")
+		}
+
+		buff, err := crypto.MarshalPrivateKey(privateKey)
+
+		if err != nil {
+			return nil, errors.Wrap(err, "create libp2p key error")
+		}
+
+		libp2pKeyConfig = crypto.ConfigEncodeKey(buff)
+
+		node.I("create new libp2p key: {@key}", libp2pKeyConfig)
+
+	} else {
+		buff, err := crypto.ConfigDecodeKey(libp2pKeyConfig)
+
+		if err != nil {
+			return nil, errors.Wrap(err, "load libp2p key error")
+		}
+
+		privateKey, err = crypto.UnmarshalPrivateKey(buff)
+
+		if err != nil {
+			return nil, errors.Wrap(err, "load libp2p key error")
+		}
+	}
+
+	return privateKey, nil
 }
 
 func (node *libp2pNode) Start() error {
