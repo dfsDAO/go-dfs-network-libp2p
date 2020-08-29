@@ -2,7 +2,6 @@ package network
 
 import (
 	"context"
-	"time"
 
 	dht "github.com/dfsdao/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p"
@@ -29,6 +28,13 @@ var (
 
 var keydbKey = []byte("libp2p.key")
 
+// Node .
+type Node interface {
+	smf4go.Runnable
+	Host() host.Host
+	DHT() *dht.IpfsDHT
+}
+
 type libp2pNode struct {
 	slf4go.Logger
 	host host.Host
@@ -36,7 +42,7 @@ type libp2pNode struct {
 }
 
 // New .
-func New(config scf4go.Config) (smf4go.Runnable, error) {
+func New(config scf4go.Config) (Node, error) {
 
 	logger := slf4go.Get("dfs-network-libp2p")
 
@@ -87,6 +93,14 @@ func New(config scf4go.Config) (smf4go.Runnable, error) {
 	return node, nil
 }
 
+func (node *libp2pNode) Host() host.Host {
+	return node.host
+}
+
+func (node *libp2pNode) DHT() *dht.IpfsDHT {
+	return node.dht
+}
+
 func (node *libp2pNode) createDHT(config scf4go.Config, host host.Host) (*dht.IpfsDHT, error) {
 	var dhtBoostrapAddrs []string
 
@@ -117,9 +131,9 @@ func (node *libp2pNode) createDHT(config scf4go.Config, host host.Host) (*dht.Ip
 		node.I("add dht bootstrap addr {@}", addrInfo.String())
 	}
 
-	if len(peers) == 0 {
-		return nil, errors.Wrap(ErrDHTBoostrap, "libp2p.dht.boostrap can't be empty")
-	}
+	// if len(peers) == 0 {
+	// 	return nil, errors.Wrap(ErrDHTBoostrap, "libp2p.dht.boostrap can't be empty")
+	// }
 
 	dhOpts := []dht.Option{
 		dht.BootstrapPeers(peers...),
@@ -197,28 +211,5 @@ func (node *libp2pNode) privateKey(config scf4go.Config) (crypto.PrivKey, error)
 }
 
 func (node *libp2pNode) Start() error {
-
-	// err := <-node.dht.ForceRefresh()
-
-	// if err != nil {
-	// 	return errors.Wrap(err, "libp2p dht bootstrap error")
-	// }
-
-	go node.listPeers()
-
 	return nil
-}
-
-func (node *libp2pNode) listPeers() {
-
-	ticker := time.NewTicker(time.Second)
-
-	defer ticker.Stop()
-
-	for range ticker.C {
-		node.I("list dht peer")
-		for _, peer := range node.dht.RoutingTable().ListPeers() {
-			node.I("find peer {@peer}", peer.Pretty())
-		}
-	}
 }
